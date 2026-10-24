@@ -33,6 +33,16 @@ struct MapContainerView: UIViewRepresentable {
         pan.delegate = context.coordinator
         mapView.addGestureRecognizer(pan)
 
+        let longPress = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleMapLongPress(_:))
+        )
+        longPress.minimumPressDuration = 0.45
+        longPress.allowableMovement = 8
+        longPress.cancelsTouchesInView = false
+        longPress.delegate = context.coordinator
+        mapView.addGestureRecognizer(longPress)
+
         context.coordinator.mapView = mapView
         context.coordinator.lastIs3D = engine.is3D
         return mapView
@@ -67,13 +77,14 @@ struct MapContainerView: UIViewRepresentable {
     }
 
     private func syncAnnotations(_ mapView: MKMapView) {
+        let pins = engine.mapPins
         let current = mapView.annotations.compactMap { $0 as? PlaceAnnotation }
         let currentIDs = Set(current.map { $0.place.id })
-        let desiredIDs = Set(engine.places.map { $0.id })
+        let desiredIDs = Set(pins.map { $0.id })
         guard currentIDs != desiredIDs else { return }
 
         mapView.removeAnnotations(current)
-        let annotations = engine.places.map { PlaceAnnotation(place: $0) }
+        let annotations = pins.map { PlaceAnnotation(place: $0) }
         mapView.addAnnotations(annotations)
     }
 
@@ -169,6 +180,13 @@ struct MapContainerView: UIViewRepresentable {
             if !engine.places.isEmpty {
                 engine.showSearchArea = true
             }
+        }
+
+        @objc func handleMapLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began, let mapView else { return }
+            let point = gesture.location(in: mapView)
+            let coordinate = mapView.convert(point, toCoordinateFrom: mapView)
+            engine.dropPin(at: coordinate)
         }
 
         func gestureRecognizer(

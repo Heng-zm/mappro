@@ -14,6 +14,14 @@ struct MapControlsView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("My location")
 
+            Button {
+                engine.dropPin(at: engine.mapRegion.center)
+            } label: {
+                MapControlCircle(symbol: "mappin.and.ellipse")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Drop a pin at map center")
+
             Button(action: engine.resetNorth) {
                 MapControlCircle(
                     symbol: "location.north.fill",

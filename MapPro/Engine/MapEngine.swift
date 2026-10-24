@@ -31,6 +31,7 @@ final class MapEngine: NSObject, ObservableObject {
 
     // Selection
     @Published var selectedPlace: Place?
+    @Published var droppedPin: Place?
 
     // Directions
     @Published var directionsDestination: Place?
@@ -57,11 +58,13 @@ final class MapEngine: NSObject, ObservableObject {
 
     private let locationManager = CLLocationManager()
     private let completer = MKLocalSearchCompleter()
+    private let geocoder = CLGeocoder()
     private var searchWorkItem: DispatchWorkItem?
     private var searchToken = UUID()
     private var currentSearch: MKLocalSearch?
     private var directionsToken = UUID()
     private var currentDirections: MKDirections?
+    private var pinToken = UUID()
     private var hasCenteredOnUser = false
     private var hasStarted = false
     private var toastWorkItem: DispatchWorkItem?
@@ -106,6 +109,21 @@ final class MapEngine: NSObject, ObservableObject {
         return routeOptions.first { $0.id == selectedRouteID }
     }
 
+    /// Everything that should appear on the map: search results, the persistent
+    /// dropped pin, and any externally selected place (for example a favorite).
+    var mapPins: [Place] {
+        var pins = places
+
+        if let droppedPin, !pins.contains(where: { $0.id == droppedPin.id }) {
+            pins.append(droppedPin)
+        }
+        if let selectedPlace, !pins.contains(where: { $0.id == selectedPlace.id }) {
+            pins.append(selectedPlace)
+        }
+
+        return pins
+    }
+
     // MARK: - Search
 
     func updateSearchQuery(_ query: String) {
@@ -133,6 +151,11 @@ final class MapEngine: NSObject, ObservableObject {
     func search(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        if let coordinate = CoordinateParser.parse(trimmed) {
+            searchCoordinate(coordinate)
+            return
+        }
 
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = trimmed
@@ -183,6 +206,7 @@ final class MapEngine: NSObject, ObservableObject {
         showSearchArea = false
         suggestions = []
         selectedPlace = nil
+        clearDroppedPin()
         clearRoute()
 
         let search = MKLocalSearch(request: request)
@@ -267,6 +291,9 @@ final class MapEngine: NSObject, ObservableObject {
     // MARK: - Selection
 
     func select(place: Place) {
+        if place.isDroppedPin {
+            droppedPin = place
+        }
         guard selectedPlace?.id != place.id else { return }
         selectedPlace = place
         cameraCommand = CameraCommand(target: .coordinate(place.coordinate, altitude: 1100))
@@ -275,6 +302,92 @@ final class MapEngine: NSObject, ObservableObject {
 
     func clearSelection() {
         selectedPlace = nil
+    }
+
+    // MARK: - Coordinates and dropped pins
+
+    /// Drops a pin at an arbitrary coordinate and reverse geocodes a street address.
+    func dropPin(at coordinate: CLLocationCoordinate2D, announce: Bool = true) {
+        geocoder.cancelGeocode()
+        pinToken = UUID()
+
+        let pin = Place(
+            name: "Dropped pin",
+            address: Formatters.coordinate(coordinate),
+            coordinate: coordinate,
+            isDroppedPin: true
+        )
+
+        droppedPin = pin
+        selectedPlace = pin
+        showSearchArea = false
+        clearRoute()
+        Haptics.select()
+
+        if announce {
+            showToast("Pin dropped at \(Formatters.coordinate(coordinate))")
+        }
+
+        reverseGeocode(pin)
+    }
+
+    func searchCoordinate(_ coordinate: CLLocationCoordinate2D) {
+        searchToken = UUID()
+        searchWorkItem?.cancel()
+        currentSearch?.cancel()
+        currentSearch = nil
+        isSearching = false
+        suggestions = []
+        places = []
+        showSearchArea = false
+        lastQuery = CoordinateParser.format(coordinate)
+        selectedPlace = nil
+        clearRoute()
+        dropPin(at: coordinate, announce: false)
+        cameraCommand = CameraCommand(target: .coordinate(coordinate, altitude: 1200))
+        showToast("Showing \(Formatters.coordinate(coordinate))")
+    }
+
+    func clearDroppedPin() {
+        geocoder.cancelGeocode()
+        pinToken = UUID()
+
+        if let droppedPin, selectedPlace?.id == droppedPin.id {
+            selectedPlace = nil
+        }
+        droppedPin = nil
+    }
+
+    private func reverseGeocode(_ pin: Place) {
+        let token = UUID()
+        pinToken = token
+        let location = CLLocation(latitude: pin.coordinate.latitude, longitude: pin.coordinate.longitude)
+
+        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                guard self.pinToken == token,
+                      let current = self.droppedPin,
+                      current.id == pin.id,
+                      let mark = placemarks?.first else { return }
+
+                let address = Place.addressText(
+                    from: mark,
+                    fallback: Formatters.coordinate(pin.coordinate)
+                )
+                let updated = Place(
+                    name: "Dropped pin",
+                    address: address,
+                    coordinate: pin.coordinate,
+                    isDroppedPin: true
+                )
+
+                self.droppedPin = updated
+                if self.selectedPlace?.id == updated.id {
+                    self.selectedPlace = updated
+                }
+            }
+        }
     }
 
     // MARK: - Directions

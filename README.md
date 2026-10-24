@@ -26,6 +26,9 @@ MapPro recreates the everyday Google Maps phone experience using MapKit as the r
 - **Live search suggestions** powered by `MKLocalSearchCompleter`
 - **Nearby category search** for restaurants, coffee, fuel, hotels, groceries, pharmacies, parking, EV charging, bars, attractions, parks, and shopping
 - **Place details card** with category, address, distance, call, website, share, and directions
+- **Coordinate tools** — long-press anywhere to drop a pin with a reverse-geocoded address, tap to copy decimal coordinates, or search `37.7749, -122.4194` directly (map links are understood too)
+- **Saved places and pins** — bookmark any place or coordinate pin and reopen it later from the saved panel; stored on-device
+- **Look Around** — full-screen Apple street-level imagery for supported coordinates
 - **Directions for driving, walking, and transit** with alternate driving routes, ETA, distance, arrival time, and turn-by-turn steps
 - **Route polyline** rendered on the map with automatic camera framing
 - **Traffic overlay**, standard / satellite / hybrid layers, 2D / 3D camera, and a live compass
@@ -45,7 +48,7 @@ MapPro/
 │   ├── MapContainerView.swift  UIViewRepresentable wrapper around MKMapView
 │   ├── PlaceAnnotation.swift   MKAnnotation model for search results
 │   └── PlaceAnnotationView.swift Custom category-colored map pin
-├── Models/                     Place, route options, travel modes, map layers, categories
+├── Models/                     Place, saved places, favorites store, route options, travel modes, map layers, categories
 ├── Views/
 │   ├── RootView.swift          Map + floating Google-style UI
 │   ├── SearchBarView.swift
@@ -53,10 +56,12 @@ MapPro/
 │   ├── CategoryChipsView.swift
 │   ├── ResultsPanel.swift
 │   ├── PlaceCardView.swift
+│   ├── SavedPlacesPanel.swift
+│   ├── LookAroundSheet.swift
 │   ├── DirectionsSheet.swift
 │   ├── MapControlsView.swift
 │   └── ToastView.swift
-└── Utilities/                  Theme, formatters, haptics
+└── Utilities/                  Theme, formatters, coordinate parser, haptics
 ```
 
 The map itself is a real `MKMapView` wrapped in SwiftUI. This keeps gesture handling, tile rendering, overlays, and camera animation on Apple's optimized native path while the search, cards, sheets, and controls stay declarative in SwiftUI.
@@ -88,11 +93,11 @@ Every push to `main` runs [`.github/workflows/build-ipa.yml`](.github/workflows/
 3. Packages a real **unsigned `.ipa`** in a `Payload/` folder
 4. Uploads the IPA and SHA-256 checksum as build artifacts
 
-Pushing a tag such as `v1.0.0` also publishes a GitHub Release with the IPA attached:
+Pushing a tag such as `v1.1.0` also publishes a GitHub Release with the IPA attached:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 ### Installing the unsigned IPA

@@ -113,7 +113,8 @@ jobs:
             Install it with AltStore, Sideloadly, or your own signing workflow using your Apple ID.
 
             Includes: live search suggestions, nearby categories, place details, driving/walking/transit directions,
-            route alternatives, turn-by-turn steps, traffic, map layers, 3D camera, and smooth native MapKit motion.
+            route alternatives, turn-by-turn steps, traffic, map layers, 3D camera, long-press coordinate pins,
+            coordinate search and copy, saved places, Look Around, and smooth native MapKit motion.
           files: |
             build/*.ipa
             build/*.sha256

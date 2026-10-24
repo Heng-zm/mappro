@@ -77,6 +77,7 @@ final class MapEngine: NSObject, ObservableObject {
     private var currentSearch: MKLocalSearch?
     private var directionsToken = UUID()
     private var currentDirections: MKDirections?
+    private var currentOSRMTask: URLSessionDataTask?
     private var pinToken = UUID()
     private var offlineFavorites: [Place] = []
     private var networkCancellable: AnyCancellable?
@@ -130,6 +131,20 @@ final class MapEngine: NSObject, ObservableObject {
     var selectedRoute: RouteOption? {
         guard let selectedRouteID else { return nil }
         return routeOptions.first { $0.id == selectedRouteID }
+    }
+
+    var usesOpenStreetMapRoute: Bool {
+        routeOptions.contains { $0.source == .openStreetMap }
+    }
+
+    var routeErrorTitle: String {
+        if isOffline {
+            return "You're offline"
+        }
+        if travelMode == .transit {
+            return "Transit isn't available here"
+        }
+        return "Unable to find a route"
     }
 
     /// Everything that should appear on the map: search results, the persistent
@@ -212,7 +227,7 @@ final class MapEngine: NSObject, ObservableObject {
     }
 
     var navigationNextInstruction: String? {
-        guard let route = selectedRoute?.route else { return nil }
+        guard let route = selectedRoute else { return nil }
         let start = navigationStepIndex + 1
         guard start < route.steps.count else { return nil }
 
@@ -243,12 +258,12 @@ final class MapEngine: NSObject, ObservableObject {
     }
 
     var navigationStepProgressText: String {
-        guard let route = selectedRoute?.route, !route.steps.isEmpty else { return "" }
+        guard let route = selectedRoute, !route.steps.isEmpty else { return "" }
         return "Step \(min(navigationStepIndex + 1, route.steps.count)) of \(route.steps.count)"
     }
 
-    private var currentNavigationStep: MKRoute.Step? {
-        guard let route = selectedRoute?.route,
+    private var currentNavigationStep: RouteStep? {
+        guard let route = selectedRoute,
               navigationStepIndex >= 0,
               navigationStepIndex < route.steps.count else { return nil }
         return route.steps[navigationStepIndex]
@@ -614,8 +629,7 @@ final class MapEngine: NSObject, ObservableObject {
         guard let destination = directionsDestination else { return }
 
         guard !isOffline else {
-            currentDirections?.cancel()
-            currentDirections = nil
+            cancelRoutingRequests()
             isRouting = false
             routeOptions = []
             selectedRouteID = nil
@@ -625,55 +639,112 @@ final class MapEngine: NSObject, ObservableObject {
         }
 
         let origin = userCoordinate ?? mapRegion.center
+        let mode = travelMode
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin))
         request.destination = destination.mapItem
-        request.transportType = travelMode.transportType
-        request.requestsAlternateRoutes = travelMode == .automobile
+        request.transportType = mode.transportType
+        request.requestsAlternateRoutes = mode == .automobile
 
-        currentDirections?.cancel()
+        cancelRoutingRequests()
         directionsToken = UUID()
         let token = directionsToken
         isRouting = true
         routeError = nil
+        routeOptions = []
+        selectedRouteID = nil
 
         let directions = MKDirections(request: request)
         currentDirections = directions
-        directions.calculate { [weak self] response, error in
-            guard let self else { return }
+        directions.calculate { [weak self] response, _ in
             DispatchQueue.main.async {
-                guard self.directionsToken == token else { return }
-                self.isRouting = false
+                guard let self, self.directionsToken == token else { return }
                 self.currentDirections = nil
 
-                if let error {
-                    self.routeOptions = []
-                    self.selectedRouteID = nil
-                    self.routeError = error.localizedDescription
-                    Haptics.warning()
+                if let routes = response?.routes, !routes.isEmpty {
+                    self.finishRouting(with: routes.map { RouteOption(route: $0, mode: mode) })
                     return
                 }
 
-                guard let response else {
-                    self.routeOptions = []
-                    self.selectedRouteID = nil
-                    self.routeError = "No route available."
-                    Haptics.warning()
-                    return
-                }
+                // Apple has no route coverage in several regions (including
+                // Nigeria). Retry with OpenStreetMap instead of dead-ending.
+                self.requestOpenStreetMapFallback(
+                    from: origin,
+                    to: destination,
+                    mode: mode,
+                    token: token
+                )
+            }
+        }
+    }
 
-                let options = response.routes.map { RouteOption(route: $0, mode: self.travelMode) }
-                self.routeOptions = options
-                self.selectedRouteID = options.first?.id
+    private func requestOpenStreetMapFallback(
+        from origin: CLLocationCoordinate2D,
+        to destination: Place,
+        mode: TravelMode,
+        token: UUID
+    ) {
+        guard mode != .transit else {
+            finishRoutingFailure(
+                .unsupportedMode,
+                prefixAppleFailure: false
+            )
+            return
+        }
 
-                if options.isEmpty {
-                    self.routeError = "No route available for this mode."
-                    Haptics.warning()
-                } else {
-                    Haptics.success()
+        currentOSRMTask?.cancel()
+        currentOSRMTask = OSRMRoutingService.shared.calculateRoutes(
+            from: origin,
+            to: destination.coordinate,
+            mode: mode
+        ) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, self.directionsToken == token else { return }
+                self.currentOSRMTask = nil
+
+                switch result {
+                case .success(let routes):
+                    self.finishRouting(with: routes.map { RouteOption(osrm: $0, mode: mode) })
+                case .failure(let error):
+                    self.finishRoutingFailure(error, prefixAppleFailure: true)
                 }
             }
         }
+    }
+
+    private func finishRouting(with options: [RouteOption]) {
+        isRouting = false
+        routeOptions = options
+        selectedRouteID = options.first?.id
+
+        if options.isEmpty {
+            routeError = "No route available for this mode."
+            Haptics.warning()
+        } else {
+            routeError = nil
+            Haptics.success()
+        }
+    }
+
+    private func finishRoutingFailure(_ error: OSRMRoutingError, prefixAppleFailure: Bool) {
+        isRouting = false
+        routeOptions = []
+        selectedRouteID = nil
+
+        let message = error.errorDescription ?? "No route available for this trip."
+        if prefixAppleFailure {
+            routeError = "Apple Maps couldn't find a route here. \(message)"
+        } else {
+            routeError = message
+        }
+        Haptics.warning()
+    }
+
+    private func cancelRoutingRequests() {
+        currentDirections?.cancel()
+        currentDirections = nil
+        currentOSRMTask?.cancel()
+        currentOSRMTask = nil
     }
 
     func selectRoute(_ option: RouteOption) {
@@ -685,8 +756,7 @@ final class MapEngine: NSObject, ObservableObject {
     func clearRoute() {
         stopNavigation(announce: false)
         directionsToken = UUID()
-        currentDirections?.cancel()
-        currentDirections = nil
+        cancelRoutingRequests()
         routeOptions = []
         selectedRouteID = nil
         isRouting = false
@@ -708,15 +778,15 @@ final class MapEngine: NSObject, ObservableObject {
 
         isNavigating = true
         navigationStepIndex = 0
-        navigationDistanceToManeuver = option.route.steps.first?.distance
-        navigationRemainingDistance = option.route.distance
-        navigationRemainingTime = option.route.expectedTravelTime
+        navigationDistanceToManeuver = option.steps.first?.distance
+        navigationRemainingDistance = option.distance
+        navigationRemainingTime = option.expectedTravelTime
         lastNavigationCameraUpdate = .distantPast
 
         updateNavigationMetrics(for: nil)
 
-        let start = option.route.polyline.firstCoordinate
-            ?? option.route.steps.first?.polyline.firstCoordinate
+        let start = option.polyline.firstCoordinate
+            ?? option.steps.first?.polyline.firstCoordinate
             ?? userCoordinate
             ?? directionsDestination?.coordinate
 
@@ -772,7 +842,7 @@ final class MapEngine: NSObject, ObservableObject {
     }
 
     private func updateNavigationMetrics(for location: CLLocation?) {
-        guard let route = selectedRoute?.route else {
+        guard let route = selectedRoute else {
             navigationRemainingDistance = 0
             navigationRemainingTime = 0
             navigationDistanceToManeuver = nil
@@ -815,7 +885,7 @@ final class MapEngine: NSObject, ObservableObject {
         navigationRemainingTime = max(0, route.expectedTravelTime * ratio)
     }
 
-    private func advanceStepIfNeeded(with location: CLLocation, steps: [MKRoute.Step]) {
+    private func advanceStepIfNeeded(with location: CLLocation, steps: [RouteStep]) {
         guard navigationStepIndex >= 0, navigationStepIndex < steps.count else { return }
 
         let searchEnd = min(steps.count - 1, navigationStepIndex + 4)

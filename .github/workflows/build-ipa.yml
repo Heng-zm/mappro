@@ -116,6 +116,11 @@ jobs:
             route alternatives, turn-by-turn steps, in-app navigation with live km/h speed, header compass,
             draggable coordinate pins, coordinate search and copy, saved places, offline mode, Look Around,
             traffic, map layers, 3D camera, and smooth native MapKit motion.
+
+            **Routing reliability:** MapPro tries Apple Maps first and automatically falls back to
+            OpenStreetMap (OSRM/FOSSGIS) when Apple has no route coverage in your region. OpenStreetMap
+            fallback supports driving and walking routes; transit stays Apple Maps only. Route data
+            © OpenStreetMap contributors.
           files: |
             build/*.ipa
             build/*.sha256

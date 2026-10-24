@@ -72,7 +72,7 @@ struct DirectionsSheet: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(AppTheme.orange)
-                Text("Unable to find a route")
+                Text(engine.routeErrorTitle)
                     .font(.headline)
                 Text(error)
                     .font(.footnote)
@@ -125,6 +125,21 @@ struct DirectionsSheet: View {
 
                 if let selectedRoute = engine.selectedRoute {
                     stepsSection(route: selectedRoute)
+
+                    if let attribution = selectedRoute.source.attributionText {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Apple Maps couldn't calculate this route, so MapPro used OpenStreetMap.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Link(destination: URL(string: "https://www.openstreetmap.org/copyright")!) {
+                                Text(attribution)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(AppTheme.blue)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
 
                 Button {
@@ -142,22 +157,28 @@ struct DirectionsSheet: View {
                 }
                 .buttonStyle(.plain)
 
-                Button {
-                    engine.openInAppleMaps()
-                } label: {
-                    Label("Voice navigation in Apple Maps", systemImage: "arrow.up.forward.app")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppTheme.blue)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                        .background(
-                            AppTheme.blue.opacity(0.1),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        )
+                if engine.selectedRoute?.source == .appleMaps {
+                    Button {
+                        engine.openInAppleMaps()
+                    } label: {
+                        Label("Voice navigation in Apple Maps", systemImage: "arrow.up.forward.app")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppTheme.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(
+                                AppTheme.blue.opacity(0.1),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
-                Text("In-app guidance shows maneuvers, remaining time, and live speed in km/h.")
+                Text(
+                    engine.selectedRoute?.source == .openStreetMap
+                        ? "In-app guidance shows maneuvers, remaining time, and live speed in km/h. Voice handoff isn't available for this route."
+                        : "In-app guidance shows maneuvers, remaining time, and live speed in km/h."
+                )
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -181,7 +202,7 @@ struct DirectionsSheet: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                Text(option.viaText)
+                Text("\(option.viaText) · \(option.source.displayName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

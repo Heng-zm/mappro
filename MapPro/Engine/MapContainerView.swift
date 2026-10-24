@@ -126,7 +126,7 @@ struct MapContainerView: UIViewRepresentable {
 
         guard let selectedRoute = engine.selectedRoute else { return }
 
-        let polyline = selectedRoute.route.polyline
+        let polyline = selectedRoute.polyline
         mapView.addOverlay(polyline)
         coordinator.routeOverlays = [polyline]
         mapView.setVisibleMapRect(

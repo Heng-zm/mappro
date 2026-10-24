@@ -1,0 +1,18 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcarchive
+*.ipa
+.DS_Store
+
+# XcodeGen output (generated in CI and locally by `xcodegen generate`)
+MapPro.xcodeproj/
+
+# Swift Package Manager
+.swiftpm/
+.build/

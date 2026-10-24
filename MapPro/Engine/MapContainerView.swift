@@ -167,6 +167,15 @@ struct MapContainerView: UIViewRepresentable {
             case .rect(let rect, let padding):
                 mapView.setVisibleMapRect(rect, edgePadding: padding, animated: true)
 
+            case .navigation(let coordinate, let heading):
+                let camera = MKMapCamera(
+                    lookingAtCenter: coordinate,
+                    fromDistance: 720,
+                    pitch: 52,
+                    heading: heading
+                )
+                mapView.setCamera(camera, animated: true)
+
             case .resetNorth:
                 var camera = mapView.camera
                 camera.heading = 0
@@ -196,6 +205,21 @@ struct MapContainerView: UIViewRepresentable {
             true
         }
 
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard gestureRecognizer is UILongPressGestureRecognizer, let mapView else { return true }
+
+            var hitView = mapView.hitTest(touch.location(in: mapView), with: nil)
+            while let current = hitView {
+                if let placeView = current as? PlaceAnnotationView,
+                   let annotation = placeView.annotation as? PlaceAnnotation,
+                   annotation.place.isDroppedPin {
+                    return false
+                }
+                hitView = current.superview
+            }
+            return true
+        }
+
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             guard let placeAnnotation = annotation as? PlaceAnnotation else { return nil }
 
@@ -208,8 +232,28 @@ struct MapContainerView: UIViewRepresentable {
                 )
 
             view.annotation = placeAnnotation
+            view.isDraggable = placeAnnotation.place.isDroppedPin
             view.setChosen(placeAnnotation.place.id == engine.selectedPlace?.id, animated: false)
             return view
+        }
+
+        func mapView(
+            _ mapView: MKMapView,
+            annotationView view: MKAnnotationView,
+            didChange newState: MKAnnotationView.DragState,
+            fromOldState oldState: MKAnnotationView.DragState
+        ) {
+            guard let annotation = view.annotation as? PlaceAnnotation,
+                  annotation.place.isDroppedPin else { return }
+
+            switch newState {
+            case .ending:
+                engine.moveDroppedPin(to: annotation.coordinate)
+            case .canceling:
+                annotation.coordinate = annotation.place.coordinate
+            default:
+                break
+            }
         }
 
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {

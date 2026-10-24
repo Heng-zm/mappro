@@ -30,6 +30,10 @@ MapPro recreates the everyday Google Maps phone experience using MapKit as the r
 - **Saved places and pins** — bookmark any place or coordinate pin and reopen it later from the saved panel; stored on-device
 - **Look Around** — full-screen Apple street-level imagery for supported coordinates
 - **Directions for driving, walking, and transit** with alternate driving routes, ETA, distance, arrival time, and turn-by-turn steps
+- **In-app navigation mode** with maneuver banners, next-step preview, remaining time/distance, automatic route progress, camera follow, and a live **km/h** speedometer; voice guidance is one tap away in Apple Maps
+- **Header compass** that rotates with the map and resets north with a tap
+- **Draggable coordinate pins** — long-press the map or drag the existing pin, then copy or save the exact coordinate
+- **Offline mode** — automatic connectivity detection plus a manual toggle; saved places and cached search results remain searchable, with clear banners when a network feature is unavailable
 - **Route polyline** rendered on the map with automatic camera framing
 - **Traffic overlay**, standard / satellite / hybrid layers, 2D / 3D camera, and a live compass
 - **"Search this area"** after panning, just like Google Maps
@@ -59,9 +63,11 @@ MapPro/
 │   ├── SavedPlacesPanel.swift
 │   ├── LookAroundSheet.swift
 │   ├── DirectionsSheet.swift
+│   ├── NavigationHUD.swift
+│   ├── HeaderCompassView.swift
 │   ├── MapControlsView.swift
 │   └── ToastView.swift
-└── Utilities/                  Theme, formatters, coordinate parser, haptics
+└── Utilities/                  Theme, formatters, coordinate parser, maneuver symbols, search cache, network monitor, haptics
 ```
 
 The map itself is a real `MKMapView` wrapped in SwiftUI. This keeps gesture handling, tile rendering, overlays, and camera animation on Apple's optimized native path while the search, cards, sheets, and controls stay declarative in SwiftUI.
@@ -93,11 +99,11 @@ Every push to `main` runs [`.github/workflows/build-ipa.yml`](.github/workflows/
 3. Packages a real **unsigned `.ipa`** in a `Payload/` folder
 4. Uploads the IPA and SHA-256 checksum as build artifacts
 
-Pushing a tag such as `v1.1.0` also publishes a GitHub Release with the IPA attached:
+Pushing a tag such as `v1.2.0` also publishes a GitHub Release with the IPA attached:
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 ### Installing the unsigned IPA

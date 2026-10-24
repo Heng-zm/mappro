@@ -9,6 +9,7 @@ struct CameraCommand {
         case coordinate(CLLocationCoordinate2D, altitude: CLLocationDistance)
         case region(MKCoordinateRegion)
         case rect(MKMapRect, padding: UIEdgeInsets)
+        case navigation(CLLocationCoordinate2D, heading: CLLocationDirection)
         case resetNorth
     }
 
@@ -32,6 +33,18 @@ final class MapEngine: NSObject, ObservableObject {
     // Selection
     @Published var selectedPlace: Place?
     @Published var droppedPin: Place?
+
+    // Navigation
+    @Published var isNavigating = false
+    @Published var navigationStepIndex = 0
+    @Published var navigationRemainingDistance: CLLocationDistance = 0
+    @Published var navigationRemainingTime: TimeInterval = 0
+    @Published var navigationDistanceToManeuver: CLLocationDistance?
+    @Published var speedKPH: Double = 0
+
+    // Offline
+    @Published var offlineMode = false
+    @Published private(set) var networkAvailable = true
 
     // Directions
     @Published var directionsDestination: Place?
@@ -65,6 +78,9 @@ final class MapEngine: NSObject, ObservableObject {
     private var directionsToken = UUID()
     private var currentDirections: MKDirections?
     private var pinToken = UUID()
+    private var offlineFavorites: [Place] = []
+    private var networkCancellable: AnyCancellable?
+    private var lastNavigationCameraUpdate = Date.distantPast
     private var hasCenteredOnUser = false
     private var hasStarted = false
     private var toastWorkItem: DispatchWorkItem?
@@ -77,6 +93,13 @@ final class MapEngine: NSObject, ObservableObject {
 
         completer.delegate = self
         completer.resultTypes = [.pointOfInterest, .address]
+
+        networkAvailable = NetworkMonitor.shared.isOnline
+        networkCancellable = NetworkMonitor.shared.onlinePublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] online in
+                self?.handleNetworkChange(online)
+            }
     }
 
     // MARK: - Lifecycle
@@ -124,12 +147,119 @@ final class MapEngine: NSObject, ObservableObject {
         return pins
     }
 
+    // MARK: - Offline state
+
+    var isOffline: Bool {
+        offlineMode || !networkAvailable
+    }
+
+    func updateOfflineFavorites(_ places: [Place]) {
+        offlineFavorites = places
+    }
+
+    func toggleOfflineMode() {
+        offlineMode.toggle()
+        Haptics.tap()
+
+        if offlineMode {
+            searchToken = UUID()
+            searchWorkItem?.cancel()
+            currentSearch?.cancel()
+            currentSearch = nil
+            isSearching = false
+            suggestions = []
+            clearRoute()
+            showToast("Offline mode on — saved and cached places only")
+        } else if networkAvailable {
+            showToast("Offline mode off")
+        } else {
+            showToast("Still offline — check your connection")
+        }
+    }
+
+    private func handleNetworkChange(_ online: Bool) {
+        let wasOffline = isOffline
+        networkAvailable = online
+
+        if online {
+            if wasOffline && !offlineMode {
+                showToast("Back online")
+            }
+            return
+        }
+
+        suggestions = []
+        searchWorkItem?.cancel()
+        currentSearch?.cancel()
+        currentSearch = nil
+        isSearching = false
+
+        if !wasOffline {
+            showToast("You're offline. Saved and cached places still work.")
+        }
+    }
+
+    // MARK: - Navigation state
+
+    var navigationInstruction: String {
+        guard let step = currentNavigationStep else { return "Continue" }
+        let instructions = step.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        return instructions.isEmpty ? "Continue" : instructions
+    }
+
+    var navigationManeuverSymbol: String {
+        ManeuverSymbol.symbol(for: navigationInstruction)
+    }
+
+    var navigationNextInstruction: String? {
+        guard let route = selectedRoute?.route else { return nil }
+        let start = navigationStepIndex + 1
+        guard start < route.steps.count else { return nil }
+
+        for step in route.steps[start...] {
+            let instructions = step.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !instructions.isEmpty {
+                return instructions
+            }
+        }
+        return nil
+    }
+
+    var navigationDistanceToManeuverText: String {
+        guard let distance = navigationDistanceToManeuver else { return "—" }
+        return Formatters.distance(distance)
+    }
+
+    var navigationRemainingTimeText: String {
+        Formatters.duration(navigationRemainingTime)
+    }
+
+    var navigationRemainingDistanceText: String {
+        Formatters.distance(navigationRemainingDistance)
+    }
+
+    var navigationArrivalText: String {
+        Formatters.arrivalTime(navigationRemainingTime)
+    }
+
+    var navigationStepProgressText: String {
+        guard let route = selectedRoute?.route, !route.steps.isEmpty else { return "" }
+        return "Step \(min(navigationStepIndex + 1, route.steps.count)) of \(route.steps.count)"
+    }
+
+    private var currentNavigationStep: MKRoute.Step? {
+        guard let route = selectedRoute?.route,
+              navigationStepIndex >= 0,
+              navigationStepIndex < route.steps.count else { return nil }
+        return route.steps[navigationStepIndex]
+    }
+
     // MARK: - Search
 
     func updateSearchQuery(_ query: String) {
         searchWorkItem?.cancel()
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2 else {
+        guard !isOffline, trimmed.count >= 2 else {
             suggestions = []
             return
         }
@@ -196,6 +326,11 @@ final class MapEngine: NSObject, ObservableObject {
     }
 
     private func performSearch(_ request: MKLocalSearch.Request, query: String) {
+        if isOffline {
+            performOfflineSearch(query)
+            return
+        }
+
         searchWorkItem?.cancel()
         searchToken = UUID()
         let token = searchToken
@@ -237,9 +372,47 @@ final class MapEngine: NSObject, ObservableObject {
                 if found.isEmpty {
                     self.showToast("No results found for \"\(query)\".")
                 } else {
+                    SearchCache.shared.save(query: query, places: found)
                     Haptics.success()
                 }
             }
+        }
+    }
+
+    private func performOfflineSearch(_ query: String) {
+        searchToken = UUID()
+        searchWorkItem?.cancel()
+        currentSearch?.cancel()
+        currentSearch = nil
+        isSearching = false
+        showSearchArea = false
+        suggestions = []
+        selectedPlace = nil
+        clearDroppedPin()
+        clearRoute()
+
+        lastQuery = query
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var found = SearchCache.shared.results(for: query)
+        let favorites = offlineFavorites.filter { place in
+            place.name.localizedCaseInsensitiveContains(trimmed)
+                || place.address.localizedCaseInsensitiveContains(trimmed)
+                || place.categoryName.localizedCaseInsensitiveContains(trimmed)
+                || place.coordinateText.contains(trimmed)
+        }
+        for favorite in favorites where !found.contains(where: { $0.id == favorite.id }) {
+            found.append(favorite)
+        }
+
+        places = found
+
+        if found.isEmpty {
+            showToast("Offline — no saved or cached places for \"\(query)\".")
+        } else {
+            fitToResults()
+            showToast("Offline — showing \(found.count) saved or cached \(found.count == 1 ? "place" : "places").")
+            Haptics.success()
         }
     }
 
@@ -328,7 +501,35 @@ final class MapEngine: NSObject, ObservableObject {
             showToast("Pin dropped at \(Formatters.coordinate(coordinate))")
         }
 
-        reverseGeocode(pin)
+        if !isOffline {
+            reverseGeocode(pin)
+        }
+    }
+
+    /// Moves the existing dropped pin, for example after the user drags it.
+    func moveDroppedPin(to coordinate: CLLocationCoordinate2D) {
+        guard droppedPin != nil else { return }
+
+        geocoder.cancelGeocode()
+        pinToken = UUID()
+
+        let pin = Place(
+            name: "Dropped pin",
+            address: Formatters.coordinate(coordinate),
+            coordinate: coordinate,
+            isDroppedPin: true
+        )
+
+        droppedPin = pin
+        selectedPlace = pin
+        showSearchArea = false
+        clearRoute()
+        Haptics.select()
+        showToast("Pin moved to \(Formatters.coordinate(coordinate))")
+
+        if !isOffline {
+            reverseGeocode(pin)
+        }
     }
 
     func searchCoordinate(_ coordinate: CLLocationCoordinate2D) {
@@ -397,6 +598,7 @@ final class MapEngine: NSObject, ObservableObject {
         routeOptions = []
         selectedRouteID = nil
         routeError = nil
+        stopNavigation(announce: false)
         requestDirections()
     }
 
@@ -410,6 +612,17 @@ final class MapEngine: NSObject, ObservableObject {
 
     func requestDirections() {
         guard let destination = directionsDestination else { return }
+
+        guard !isOffline else {
+            currentDirections?.cancel()
+            currentDirections = nil
+            isRouting = false
+            routeOptions = []
+            selectedRouteID = nil
+            routeError = "Directions need an internet connection. Saved places and cached results still work offline."
+            Haptics.warning()
+            return
+        }
 
         let origin = userCoordinate ?? mapRegion.center
         let request = MKDirections.Request()
@@ -470,6 +683,7 @@ final class MapEngine: NSObject, ObservableObject {
     }
 
     func clearRoute() {
+        stopNavigation(announce: false)
         directionsToken = UUID()
         currentDirections?.cancel()
         currentDirections = nil
@@ -480,14 +694,165 @@ final class MapEngine: NSObject, ObservableObject {
     }
 
     func endDirections() {
+        stopNavigation(announce: false)
         clearRoute()
         directionsDestination = nil
     }
 
+    /// Starts an in-app guidance session along the selected route.
     func startNavigation() {
+        guard let option = selectedRoute else {
+            showToast("Choose a route first.")
+            return
+        }
+
+        isNavigating = true
+        navigationStepIndex = 0
+        navigationDistanceToManeuver = option.route.steps.first?.distance
+        navigationRemainingDistance = option.route.distance
+        navigationRemainingTime = option.route.expectedTravelTime
+        lastNavigationCameraUpdate = .distantPast
+
+        updateNavigationMetrics(for: nil)
+
+        let start = option.route.polyline.firstCoordinate
+            ?? option.route.steps.first?.polyline.firstCoordinate
+            ?? userCoordinate
+            ?? directionsDestination?.coordinate
+
+        if let start {
+            let heading = userCoordinate != nil ? self.heading : 0
+            cameraCommand = CameraCommand(target: .navigation(start, heading: heading))
+        }
+
+        showToast("Navigation started")
+        Haptics.success()
+    }
+
+    /// Hands the current destination to the system Maps app for voice guidance.
+    func openInAppleMaps() {
         guard let destination = directionsDestination else { return }
         let options: [String: Any] = [MKLaunchOptionsDirectionsModeKey: travelMode.launchMode]
         _ = destination.mapItem.openInMaps(launchOptions: options)
+    }
+
+    func stopNavigation(announce: Bool = true) {
+        guard isNavigating else { return }
+
+        isNavigating = false
+        navigationStepIndex = 0
+        navigationRemainingDistance = 0
+        navigationRemainingTime = 0
+        navigationDistanceToManeuver = nil
+        lastNavigationCameraUpdate = .distantPast
+
+        if announce {
+            showToast("Navigation ended")
+            Haptics.tap()
+        }
+    }
+
+    // MARK: - Navigation progress
+
+    private func updateNavigation(with location: CLLocation) {
+        guard isNavigating else { return }
+
+        updateNavigationMetrics(for: location)
+        followNavigation(with: location)
+
+        if let destination = directionsDestination {
+            let destinationLocation = CLLocation(
+                latitude: destination.coordinate.latitude,
+                longitude: destination.coordinate.longitude
+            )
+            if location.distance(from: destinationLocation) < 35 {
+                finishNavigation()
+            }
+        }
+    }
+
+    private func updateNavigationMetrics(for location: CLLocation?) {
+        guard let route = selectedRoute?.route else {
+            navigationRemainingDistance = 0
+            navigationRemainingTime = 0
+            navigationDistanceToManeuver = nil
+            return
+        }
+
+        let steps = route.steps
+        guard !steps.isEmpty else {
+            navigationRemainingDistance = route.distance
+            navigationRemainingTime = route.expectedTravelTime
+            navigationDistanceToManeuver = route.distance
+            return
+        }
+
+        if let location {
+            advanceStepIfNeeded(with: location, steps: steps)
+        }
+
+        let index = min(max(navigationStepIndex, 0), steps.count - 1)
+        var currentStepRemaining = steps[index].distance
+        var remaining = currentStepRemaining
+
+        if let location, let start = steps[index].polyline.firstCoordinate {
+            let startLocation = CLLocation(latitude: start.latitude, longitude: start.longitude)
+            let traveled = location.distance(from: startLocation)
+            currentStepRemaining = max(0, steps[index].distance - traveled)
+            remaining = currentStepRemaining
+        }
+
+        if index + 1 < steps.count {
+            for stepIndex in (index + 1)..<steps.count {
+                remaining += steps[stepIndex].distance
+            }
+        }
+
+        navigationRemainingDistance = remaining
+        navigationDistanceToManeuver = currentStepRemaining
+
+        let ratio = route.distance > 0 ? min(1, max(0, remaining / route.distance)) : 0
+        navigationRemainingTime = max(0, route.expectedTravelTime * ratio)
+    }
+
+    private func advanceStepIfNeeded(with location: CLLocation, steps: [MKRoute.Step]) {
+        guard navigationStepIndex >= 0, navigationStepIndex < steps.count else { return }
+
+        let searchEnd = min(steps.count - 1, navigationStepIndex + 4)
+        var bestIndex = navigationStepIndex
+        var bestDistance = CLLocationDistance.greatestFiniteMagnitude
+
+        for index in navigationStepIndex...searchEnd {
+            guard let start = steps[index].polyline.firstCoordinate else { continue }
+            let startLocation = CLLocation(latitude: start.latitude, longitude: start.longitude)
+            let distance = location.distance(from: startLocation)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestIndex = index
+            }
+        }
+
+        if bestDistance < 20, bestIndex > navigationStepIndex {
+            navigationStepIndex = bestIndex
+        }
+    }
+
+    private func followNavigation(with location: CLLocation) {
+        let now = Date()
+        guard now.timeIntervalSince(lastNavigationCameraUpdate) > 1.2 else { return }
+        lastNavigationCameraUpdate = now
+
+        let heading = location.course >= 0 ? location.course : 0
+        cameraCommand = CameraCommand(target: .navigation(location.coordinate, heading: heading))
+    }
+
+    private func finishNavigation() {
+        let name = directionsDestination?.name ?? "your destination"
+        stopNavigation(announce: false)
+        clearRoute()
+        directionsDestination = nil
+        showToast("You've arrived at \(name)")
+        Haptics.success()
     }
 
     // MARK: - Map controls
@@ -580,7 +945,13 @@ extension MapEngine: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last, location.horizontalAccuracy >= 0 else { return }
         userCoordinate = location.coordinate
-        focusOnUserIfNeeded()
+        speedKPH = location.speed >= 0 ? location.speed * 3.6 : 0
+
+        if isNavigating {
+            updateNavigation(with: location)
+        } else {
+            focusOnUserIfNeeded()
+        }
     }
 }
 

@@ -69,6 +69,7 @@ final class PlaceAnnotationView: MKAnnotationView {
             systemName: placeAnnotation.place.symbolName,
             withConfiguration: symbolConfiguration
         )
+        isDraggable = placeAnnotation.place.isDroppedPin
     }
 
     func setChosen(_ chosen: Bool, animated: Bool) {
@@ -97,5 +98,6 @@ final class PlaceAnnotationView: MKAnnotationView {
         super.prepareForReuse()
         transform = .identity
         layer.zPosition = 0
+        isDraggable = false
     }
 }

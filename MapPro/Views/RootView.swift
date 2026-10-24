@@ -16,13 +16,20 @@ struct RootView: View {
             MapContainerView(engine: engine)
                 .ignoresSafeArea()
 
-            topOverlay
-            mapControls
-            bottomCards
+            if engine.isNavigating {
+                NavigationHUD(engine: engine, onEnd: endNavigation)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            } else {
+                topOverlay
+                mapControls
+                bottomCards
+            }
         }
         .background(Color.mapCanvas)
         .sheet(isPresented: $showDirections, onDismiss: {
-            engine.endDirections()
+            if !engine.isNavigating {
+                engine.endDirections()
+            }
         }) {
             DirectionsSheet(engine: engine, onClose: {
                 showDirections = false
@@ -43,9 +50,21 @@ struct RootView: View {
         }
         .onAppear {
             engine.start()
+            engine.updateOfflineFavorites(favorites.places.map { $0.place })
         }
         .onChange(of: query) { _, newValue in
             engine.updateSearchQuery(newValue)
+        }
+        .onChange(of: favorites.places) { _, places in
+            engine.updateOfflineFavorites(places.map { $0.place })
+        }
+        .onChange(of: engine.isNavigating) { _, navigating in
+            if navigating {
+                isSearchFocused = false
+                showResults = false
+                showSavedPlaces = false
+                showDirections = false
+            }
         }
         .onChange(of: isSearchFocused) { _, focused in
             if focused && showResults {
@@ -77,6 +96,9 @@ struct RootView: View {
                 )
 
                 if !isSearchFocused {
+                    HeaderCompassView(engine: engine)
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+
                     savedButton
                         .transition(.scale(scale: 0.85).combined(with: .opacity))
                 }
@@ -98,6 +120,11 @@ struct RootView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            if engine.isOffline {
+                offlineBanner
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             if engine.isLocationDenied {
                 locationBanner
             }
@@ -111,6 +138,47 @@ struct RootView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.9), value: engine.suggestions.count)
         .animation(.easeInOut(duration: 0.2), value: engine.showSearchArea)
         .animation(.easeInOut(duration: 0.2), value: engine.toast)
+        .animation(.easeInOut(duration: 0.2), value: engine.isOffline)
+    }
+
+    private var offlineBanner: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppTheme.orange)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(engine.offlineMode ? "Offline mode" : "No internet connection")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("Saved and cached places still work.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Button(engine.offlineMode ? "Go online" : "Saved") {
+                if engine.offlineMode {
+                    engine.toggleOfflineMode()
+                } else {
+                    showSavedPlaces = true
+                }
+            }
+            .font(.footnote.weight(.bold))
+            .foregroundStyle(AppTheme.blue)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(
+            .regularMaterial,
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.22), lineWidth: 0.5)
+        )
+        .shadow(color: Color.black.opacity(0.14), radius: 8, y: 3)
     }
 
     private var savedButton: some View {
@@ -222,8 +290,7 @@ struct RootView: View {
                         copyCoordinates(place)
                     },
                     onLookAround: {
-                        Haptics.tap()
-                        lookAroundPlace = place
+                        openLookAround(place)
                     },
                     onRemovePin: removePinAction(for: place)
                 )
@@ -354,6 +421,24 @@ struct RootView: View {
     private func removePinAction(for place: Place) -> (() -> Void)? {
         guard place.isDroppedPin else { return nil }
         return removeDroppedPin
+    }
+
+    private func openLookAround(_ place: Place) {
+        guard !engine.isOffline else {
+            Haptics.warning()
+            engine.showToast("Look Around needs an internet connection.")
+            return
+        }
+        Haptics.tap()
+        lookAroundPlace = place
+    }
+
+    private func endNavigation() {
+        engine.stopNavigation()
+        engine.endDirections()
+        isSearchFocused = false
+        showResults = false
+        showDirections = false
     }
 
     private func openSettings() {

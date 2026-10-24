@@ -25,7 +25,7 @@ struct DirectionsSheet: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    if engine.directionsDestination != nil {
+                    if engine.selectedRoute != nil {
                         Button("Start") {
                             engine.startNavigation()
                         }
@@ -141,6 +141,27 @@ struct DirectionsSheet: View {
                     .background(AppTheme.blue, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .buttonStyle(.plain)
+
+                Button {
+                    engine.openInAppleMaps()
+                } label: {
+                    Label("Voice navigation in Apple Maps", systemImage: "arrow.up.forward.app")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.blue)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(
+                            AppTheme.blue.opacity(0.1),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Text("In-app guidance shows maneuvers, remaining time, and live speed in km/h.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
             }
             .padding(16)
         }
@@ -208,7 +229,7 @@ struct DirectionsSheet: View {
                             Circle()
                                 .fill(index == 0 ? AppTheme.green.opacity(0.15) : Color.primary.opacity(0.06))
                                 .frame(width: 30, height: 30)
-                            Image(systemName: index == 0 ? "location.fill" : "arrow.turn.up.right")
+                            Image(systemName: ManeuverSymbol.symbol(for: step.instructions))
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(index == 0 ? AppTheme.green : Color.secondary)
                         }

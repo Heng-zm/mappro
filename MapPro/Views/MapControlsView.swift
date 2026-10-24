@@ -32,6 +32,15 @@ struct MapControlsView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Reset north")
 
+            Button(action: engine.toggleOfflineMode) {
+                MapControlCircle(
+                    symbol: engine.isOffline ? "wifi.slash" : "wifi",
+                    active: engine.offlineMode
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(engine.offlineMode ? "Turn off offline mode" : "Turn on offline mode")
+
             Menu {
                 ForEach(MapLayer.allCases) { layer in
                     Button {

@@ -3,7 +3,8 @@ import UIKit
 
 final class PlaceAnnotation: NSObject, MKAnnotation {
     let place: Place
-    var coordinate: CLLocationCoordinate2D
+    /// KVO-compliant so MapKit can update it while the user drags the pin.
+    @objc dynamic var coordinate: CLLocationCoordinate2D
 
     var title: String? { place.name }
     var subtitle: String? { place.address }

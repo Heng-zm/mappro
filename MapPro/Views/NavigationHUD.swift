@@ -50,6 +50,18 @@ struct NavigationHUD: View {
 
                 Spacer(minLength: 2)
 
+                Button {
+                    engine.toggleVoiceGuidance()
+                } label: {
+                    Image(systemName: engine.voiceGuidanceEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(engine.voiceGuidanceEnabled ? AppTheme.blue : Color.secondary)
+                        .frame(width: 30, height: 30)
+                        .background(Color.primary.opacity(0.07), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(engine.voiceGuidanceEnabled ? "Mute voice guidance" : "Unmute voice guidance")
+
                 Button(action: onEnd) {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .bold))

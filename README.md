@@ -31,7 +31,7 @@ MapPro recreates the everyday Google Maps phone experience using MapKit as the r
 - **Look Around** — full-screen Apple street-level imagery for supported coordinates
 - **Directions for driving, walking, and transit** with alternate driving routes, ETA, distance, arrival time, and turn-by-turn steps
 - **Automatic OpenStreetMap fallback** — if Apple Maps has no route coverage in your region, MapPro retries driving and walking routes through public OSRM/FOSSGIS servers, with the same route cards, steps, and in-app navigation; transit remains Apple Maps only
-- **In-app navigation mode** with maneuver banners, next-step preview, remaining time/distance, automatic route progress, camera follow, and a live **km/h** speedometer; voice guidance is one tap away in Apple Maps when the route comes from Apple
+- **In-app navigation mode** with maneuver banners, next-step preview, remaining time/distance, automatic route progress, camera follow, spoken maneuver guidance with a mute toggle, and a live **km/h** speedometer; Apple-routed trips can also hand off to Apple Maps for voice guidance
 - **Header compass** that rotates with the map and resets north with a tap
 - **Draggable coordinate pins** — long-press the map or drag the existing pin, then copy or save the exact coordinate
 - **Offline mode** — automatic connectivity detection plus a manual toggle; saved places and cached search results remain searchable, with clear banners when a network feature is unavailable
@@ -68,7 +68,7 @@ MapPro/
 │   ├── HeaderCompassView.swift
 │   ├── MapControlsView.swift
 │   └── ToastView.swift
-└── Utilities/                  Theme, formatters, coordinate parser, maneuver symbols, OSRM routing, search cache, network monitor, haptics
+└── Utilities/                  Theme, formatters, coordinate parser, maneuver symbols, OSRM routing, voice guidance, search cache, network monitor, haptics
 ```
 
 The map itself is a real `MKMapView` wrapped in SwiftUI. This keeps gesture handling, tile rendering, overlays, and camera animation on Apple's optimized native path while the search, cards, sheets, and controls stay declarative in SwiftUI.
@@ -100,11 +100,11 @@ Every push to `main` runs [`.github/workflows/build-ipa.yml`](.github/workflows/
 3. Packages a real **unsigned `.ipa`** in a `Payload/` folder
 4. Uploads the IPA and SHA-256 checksum as build artifacts
 
-Pushing a tag such as `v1.2.1` also publishes a GitHub Release with the IPA attached:
+Pushing a tag such as `v1.3.0` also publishes a GitHub Release with the IPA attached:
 
 ```bash
-git tag v1.2.1
-git push origin v1.2.1
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 ### Installing the unsigned IPA
@@ -118,7 +118,7 @@ The release build is unsigned. Install it with a sideloading tool such as **AltS
 
 ## Privacy
 
-MapPro does not collect analytics and has no server. Location is used only on-device to center the map, search nearby, and calculate routes. Search and directions are handled by Apple's MapKit services under Apple's privacy policy. When Apple cannot calculate a route, MapPro sends only the trip origin and destination to public OpenStreetMap routing servers (OSRM and FOSSGIS); no account or API key is used.
+MapPro does not collect analytics and has no server. Location is used only on-device to center the map, search nearby, and calculate routes. Search and directions are handled by Apple's MapKit services under Apple's privacy policy. When Apple cannot calculate a route, MapPro sends only the trip origin and destination to public OpenStreetMap routing servers (OSRM and FOSSGIS); no account or API key is used. Spoken navigation guidance is generated on-device by Apple's speech synthesizer.
 
 ## Notes
 

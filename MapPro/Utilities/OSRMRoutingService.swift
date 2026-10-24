@@ -86,7 +86,7 @@ final class OSRMRoutingService {
         request.httpMethod = "GET"
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue(
-            "MapPro/1.2.1 (iOS; https://github.com/Heng-zm/mappro)",
+            "MapPro/1.3.0 (iOS; https://github.com/Heng-zm/mappro)",
             forHTTPHeaderField: "User-Agent"
         )
 

@@ -41,6 +41,7 @@ final class MapEngine: NSObject, ObservableObject {
     @Published var navigationRemainingTime: TimeInterval = 0
     @Published var navigationDistanceToManeuver: CLLocationDistance?
     @Published var speedKPH: Double = 0
+    @Published var voiceGuidanceEnabled: Bool = (UserDefaults.standard.object(forKey: "MapPro.voiceGuidanceEnabled") as? Bool) ?? true
 
     // Offline
     @Published var offlineMode = false
@@ -82,6 +83,7 @@ final class MapEngine: NSObject, ObservableObject {
     private var offlineFavorites: [Place] = []
     private var networkCancellable: AnyCancellable?
     private var lastNavigationCameraUpdate = Date.distantPast
+    private var lastVoicePromptStepIndex: Int?
     private var hasCenteredOnUser = false
     private var hasStarted = false
     private var toastWorkItem: DispatchWorkItem?
@@ -782,6 +784,7 @@ final class MapEngine: NSObject, ObservableObject {
         navigationRemainingDistance = option.distance
         navigationRemainingTime = option.expectedTravelTime
         lastNavigationCameraUpdate = .distantPast
+        lastVoicePromptStepIndex = nil
 
         updateNavigationMetrics(for: nil)
 
@@ -793,6 +796,15 @@ final class MapEngine: NSObject, ObservableObject {
         if let start {
             let heading = userCoordinate != nil ? self.heading : 0
             cameraCommand = CameraCommand(target: .navigation(start, heading: heading))
+        }
+
+        VoiceGuidance.shared.stop()
+        if voiceGuidanceEnabled {
+            VoiceGuidance.shared.speak(
+                "Starting navigation. \(navigationInstruction)",
+                stepIndex: navigationStepIndex,
+                force: true
+            )
         }
 
         showToast("Navigation started")
@@ -807,6 +819,7 @@ final class MapEngine: NSObject, ObservableObject {
     }
 
     func stopNavigation(announce: Bool = true) {
+        VoiceGuidance.shared.stop()
         guard isNavigating else { return }
 
         isNavigating = false
@@ -815,6 +828,7 @@ final class MapEngine: NSObject, ObservableObject {
         navigationRemainingTime = 0
         navigationDistanceToManeuver = nil
         lastNavigationCameraUpdate = .distantPast
+        lastVoicePromptStepIndex = nil
 
         if announce {
             showToast("Navigation ended")
@@ -822,12 +836,70 @@ final class MapEngine: NSObject, ObservableObject {
         }
     }
 
+    func toggleVoiceGuidance() {
+        voiceGuidanceEnabled.toggle()
+        UserDefaults.standard.set(voiceGuidanceEnabled, forKey: "MapPro.voiceGuidanceEnabled")
+
+        if voiceGuidanceEnabled {
+            speakCurrentInstruction(force: true)
+        } else {
+            VoiceGuidance.shared.stop()
+        }
+        Haptics.tap()
+    }
+
+    private func speakCurrentInstruction(force: Bool = false) {
+        guard voiceGuidanceEnabled, isNavigating else { return }
+        VoiceGuidance.shared.speak(
+            navigationInstruction,
+            stepIndex: navigationStepIndex,
+            force: force
+        )
+    }
+
+    private func announceUpcomingManeuverIfNeeded() {
+        guard voiceGuidanceEnabled, isNavigating,
+              let route = selectedRoute,
+              let distance = navigationDistanceToManeuver,
+              navigationStepIndex >= 0,
+              navigationStepIndex + 1 < route.steps.count else { return }
+
+        let nextIndex = navigationStepIndex + 1
+        guard lastVoicePromptStepIndex != nextIndex else { return }
+
+        let threshold: CLLocationDistance = travelMode == .walking ? 120 : 500
+        guard distance > 0, distance <= threshold else { return }
+
+        let instruction = route.steps[nextIndex].instructions
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instruction.isEmpty else { return }
+
+        lastVoicePromptStepIndex = nextIndex
+        VoiceGuidance.shared.speak(
+            "In \(Formatters.spokenDistance(distance)), \(lowercasingFirstLetter(instruction))",
+            stepIndex: nextIndex
+        )
+    }
+
+    private func lowercasingFirstLetter(_ text: String) -> String {
+        guard let first = text.first else { return text }
+        return first.lowercased() + String(text.dropFirst())
+    }
+
     // MARK: - Navigation progress
 
     private func updateNavigation(with location: CLLocation) {
         guard isNavigating else { return }
 
+        let previousStepIndex = navigationStepIndex
         updateNavigationMetrics(for: location)
+
+        if navigationStepIndex != previousStepIndex {
+            speakCurrentInstruction(force: true)
+        } else {
+            announceUpcomingManeuverIfNeeded()
+        }
+
         followNavigation(with: location)
 
         if let destination = directionsDestination {
@@ -921,6 +993,15 @@ final class MapEngine: NSObject, ObservableObject {
         stopNavigation(announce: false)
         clearRoute()
         directionsDestination = nil
+
+        if voiceGuidanceEnabled {
+            VoiceGuidance.shared.speak(
+                "You have arrived at \(name)",
+                stepIndex: -1,
+                force: true
+            )
+        }
+
         showToast("You've arrived at \(name)")
         Haptics.success()
     }

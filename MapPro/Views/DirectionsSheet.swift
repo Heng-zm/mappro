@@ -176,8 +176,8 @@ struct DirectionsSheet: View {
 
                 Text(
                     engine.selectedRoute?.source == .openStreetMap
-                        ? "In-app guidance shows maneuvers, remaining time, and live speed in km/h. Voice handoff isn't available for this route."
-                        : "In-app guidance shows maneuvers, remaining time, and live speed in km/h."
+                        ? "In-app guidance shows maneuvers, remaining time, live speed in km/h, and spoken directions. Voice handoff isn't available for this route."
+                        : "In-app guidance shows maneuvers, remaining time, live speed in km/h, and spoken directions."
                 )
                     .font(.caption2)
                     .foregroundStyle(.secondary)

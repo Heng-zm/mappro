@@ -9,8 +9,18 @@ enum Formatters {
         return formatter
     }()
 
+    private static let spokenDistanceFormatter: MKDistanceFormatter = {
+        let formatter = MKDistanceFormatter()
+        formatter.unitStyle = .full
+        return formatter
+    }()
+
     static func distance(_ meters: CLLocationDistance) -> String {
         distanceFormatter.string(fromDistance: max(0, meters))
+    }
+
+    static func spokenDistance(_ meters: CLLocationDistance) -> String {
+        spokenDistanceFormatter.string(fromDistance: max(0, meters))
     }
 
     static func duration(_ seconds: TimeInterval) -> String {

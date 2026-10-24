@@ -38,7 +38,6 @@ extension MKPointOfInterestCategory {
         if self == .museum { return "Museum" }
         if self == .movieTheater { return "Movie theater" }
         if self == .theater { return "Theater" }
-        if self == .musicVenue { return "Music venue" }
         if self == .stadium { return "Stadium" }
         if self == .amusementPark { return "Amusement park" }
         if self == .aquarium { return "Aquarium" }
@@ -81,7 +80,6 @@ extension MKPointOfInterestCategory {
         if self == .museum { return "building.columns.fill" }
         if self == .movieTheater { return "film.fill" }
         if self == .theater { return "theatermasks.fill" }
-        if self == .musicVenue { return "music.note" }
         if self == .stadium { return "sportscourt.fill" }
         if self == .amusementPark { return "sparkles" }
         if self == .aquarium { return "fish.fill" }
@@ -107,7 +105,7 @@ extension MKPointOfInterestCategory {
         if self == .gasStation || self == .evCharger || self == .parking || self == .airport || self == .publicTransport || self == .bank || self == .atm {
             return AppTheme.blue
         }
-        if self == .hotel || self == .museum || self == .movieTheater || self == .theater || self == .musicVenue || self == .library || self == .stadium || self == .amusementPark || self == .aquarium {
+        if self == .hotel || self == .museum || self == .movieTheater || self == .theater || self == .library || self == .stadium || self == .amusementPark || self == .aquarium {
             return AppTheme.purple
         }
         if self == .pharmacy || self == .hospital || self == .fireStation || self == .police {

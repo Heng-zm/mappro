@@ -1,3 +1,4 @@
+import MapKit
 import UIKit
 
 final class PlaceAnnotationView: MKAnnotationView {
